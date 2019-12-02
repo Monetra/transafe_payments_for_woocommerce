@@ -1,21 +1,10 @@
-=== TranSafe Payments for WooCommerce ===
-Tags: credit card, transafe, payment, gateway, woocommerce, iframe
-Requires at least: 5.2
-Tested up to: 5.3
-Stable tag: 1.0.0
-Requires PHP: 7.0.0
-License: MIT
-Contributors: gwestontransafe
-
-Accept credit card payments using TranSafe Gateway.
-
-== Description ==
+# TranSafe Payments for WooCommerce
 
 The TranSafe Payments plugin extends the functionality of WooCommerce, allowing your online store to accept credit card payments from all major credit card brands. Payment fields on your store's checkout page are generated in a secure iframe hosted by the TranSafe Gateway, so sensitive data such as credit card numbers are never entered into your site's front end or sent through your site's servers. The appearance of the secure payment fields is fully customizable with CSS, so they can blend in seamlessly with the look and feel of your checkout process.
 
-== Installation ==
+## Installation
 
-We recommend using the WordPress 'Plugins' screen to install the TranSafe Payments plugin. This will download all of the necessary files directly to your server. Alternatively, you can obtain the plugin files from WordPress.org or GitHub and manually upload them to your server. 
+We recommend using the WordPress 'Plugins' screen to install the TranSafe Payments plugin. This will download all of the necessary files directly to your server. Alternatively, you can obtain the plugin files from [WordPress.org](https://wordpress.org/plugins/transafe-payments-for-woocommerce/) or [GitHub](https://github.com/Monetra/transafe_payments_for_woocommerce) and manually upload them to your server. 
 
 Once the files are in place on your server, follow these steps:
 
