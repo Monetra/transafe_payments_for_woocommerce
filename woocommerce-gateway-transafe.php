@@ -48,7 +48,7 @@ function wc_transafe_init() {
 		const TEST_SERVER_URL = 'https://test.transafe.com';
 		const TEST_SERVER_PORT = '443';
 
-		const LIVE_SERVER_URL = 'https://live.transafe.com';
+		const LIVE_SERVER_URL = 'https://post.live.transafe.com';
 		const LIVE_SERVER_PORT = '443';
 
 		public function __construct() {
