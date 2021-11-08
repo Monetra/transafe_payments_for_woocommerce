@@ -9,6 +9,8 @@ jQuery(function($) {
 	var payment_ticket;
 	var iframeElement;
 	var payment_form_host;
+	var transafe_payment_is_selected;
+	var transafe_payment_radio_input = $('#payment_method_transafe');
 
 
 	function handlePaymentTicketResponse(response) {
@@ -50,6 +52,15 @@ jQuery(function($) {
 
 	}
 
+	function determineWhetherTransafePaymentIsSelected() {
+		var payment_method = checkout_form.find('input[name="payment_method"]:checked').val();
+		if (payment_method === 'transafe') {
+			transafe_payment_is_selected = true;
+		} else {
+			transafe_payment_is_selected = false;
+		}
+	}
+
 	body.on('updated_checkout', function() {
 
 		iframeElement = document.getElementById(iframe_id);
@@ -70,9 +81,14 @@ jQuery(function($) {
 			);
 		}
 
+		determineWhetherTransafePaymentIsSelected();
 	});
 
 	checkout_form.on('checkout_place_order', function() {
+
+		if (!transafe_payment_is_selected) {
+			return true;
+		}
 
 		if (payment_ticket_response_received) {
 			return true;
@@ -96,5 +112,7 @@ jQuery(function($) {
 	window.addEventListener("beforeunload", function(e) {
 		iframeElement.parentElement.removeChild(iframeElement);
 	});
+
+	determineWhetherTransafePaymentIsSelected();
 
 });
