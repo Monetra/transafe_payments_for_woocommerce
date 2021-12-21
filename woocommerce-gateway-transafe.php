@@ -64,6 +64,8 @@ function wc_transafe_init() {
 			$this->title        = $this->get_option( 'title' );
 			$this->description  = $this->get_option( 'description' );
 
+			$this->supports = ['refunds'];
+
 			require_once dirname(__FILE__) . '/includes/class.transafe-payment-frame.php';
 
 			add_action('woocommerce_update_options_payment_gateways_' . $this->id, [$this, 'process_admin_options']);
@@ -144,11 +146,11 @@ function wc_transafe_init() {
 
 			$ticket = sanitize_text_field($_POST['transafe_payment_ticket']);
 
-			$payment_response = $this->sendTransactionToPaymentServer($ticket, $order);
+			$payment_response = $this->sendPaymentToPaymentServer($ticket, $order);
 
 			if ($payment_response['code'] === 'AUTH') {
 			
-				$order->payment_complete();
+				$order->payment_complete($payment_response['ttid']);
 				
 				wc_reduce_stock_levels($order);
 				
@@ -168,7 +170,30 @@ function wc_transafe_init() {
 			}
 		}
 
-		private function sendTransactionToPaymentServer($payment_ticket, $order)
+		public function process_refund($order_id, $amount = null, $reason = '') {
+
+			global $woocommerce;
+
+			$order = new WC_Order($order_id);
+
+			$refund_response = $this->sendRefundToPaymentServer($amount, $order);
+
+			if (!empty($refund_response) && $refund_response['code'] === 'AUTH') {
+
+				return [
+					'result' => 'success',
+					'redirect' => $this->get_return_url($order)
+				];
+
+			} else {
+
+				return;
+
+			}
+
+		}
+
+		private function sendPaymentToPaymentServer($payment_ticket, $order)
 		{
 			$path = 'transaction/purchase';
 
@@ -206,6 +231,57 @@ function wc_transafe_init() {
 			return $transaction_response;
 		}
 
+		private function sendRefundToPaymentServer($amount, $order) {
+
+			$ttid = $order->get_transaction_id();
+			$ordernum = $order->get_order_number();
+			$order_total = $order->get_total();
+
+			$transaction_details = $this->sendTransafeApiRequest("transaction/$ttid", 'GET');
+
+			if ($transaction_details['code'] !== 'AUTH') {
+
+				error_log(
+					"Unable to retrieve prior transaction details from payment server. Response verbiage: " .
+					$transaction_details['verbiage']
+				);
+				return null;
+
+			}
+			
+			$status_flags = explode('|', $transaction_details['txnstatus']);
+
+			if (in_array('COMPLETE', $status_flags)) {
+				$method = 'POST';
+				$path = "transaction/$ttid/refund";
+				$data = [
+					'money' => [
+						'amount' => $amount
+					],
+					'order' => [
+						'ordernum' => $ordernum
+					]
+				];
+			} else {
+				$method = 'DELETE';
+				$path = "transaction/$ttid";
+				$data = [
+					'amount' => round(floatval($order_total) - floatval($amount), 2)
+				];
+			}
+
+			$refund_response = $this->sendTransafeApiRequest($path, $method, $data);
+
+			if ($refund_response['code'] !== 'AUTH') {
+				error_log(
+					'Unable to process refund through payment server. Response verbiage: ' . 
+					$refund_response['verbiage']
+				);
+			}
+
+			return $refund_response;
+		}
+
 		private function paymentServerOrigin()
 		{
 			$server = $this->get_option('server');
@@ -235,7 +311,7 @@ function wc_transafe_init() {
 			}
 		}
 
-		private function sendTransafeApiRequest($path, $method, $data)
+		private function sendTransafeApiRequest($path, $method, $data = null)
 		{
 			$url = $this->paymentServerOrigin() . '/api/v1/' . $path;
 			$username = str_replace(':', '|', $this->get_option('user'));
@@ -247,12 +323,14 @@ function wc_transafe_init() {
 
 			if ($method === 'GET') {
 
-				$url .= '?' . http_build_query($data);
+				if (!empty($data)) {
+					$url .= '?' . http_build_query($data);
+				}
 				$response = wp_remote_get($url, [
 					'headers' => $headers
 				]);
 
-			} else {
+			} elseif ($method === 'POST') {
 
 				$request_body = json_encode($data);
 				$headers["Content-Type"] = "application/json";
@@ -263,6 +341,16 @@ function wc_transafe_init() {
 					'body' => $request_body
 				]);
 
+			} else {
+				$params = [
+					'method' => $method,
+					'headers' => $headers
+				];
+				if (!empty($data)) {
+					$params['body'] = json_encode($data);
+				}
+
+				$response = wp_remote_request($url, $params);
 			}
 
 			$response_body = wp_remote_retrieve_body($response);
