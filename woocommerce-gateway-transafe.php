@@ -172,22 +172,17 @@ function wc_transafe_init() {
 
 		public function process_refund($order_id, $amount = null, $reason = '') {
 
-			global $woocommerce;
-
 			$order = new WC_Order($order_id);
 
 			$refund_response = $this->sendRefundToPaymentServer($amount, $order);
 
 			if (!empty($refund_response) && $refund_response['code'] === 'AUTH') {
 
-				return [
-					'result' => 'success',
-					'redirect' => $this->get_return_url($order)
-				];
+				return true;
 
 			} else {
 
-				return;
+				return false;
 
 			}
 
@@ -231,7 +226,7 @@ function wc_transafe_init() {
 			return $transaction_response;
 		}
 
-		private function sendRefundToPaymentServer($amount, $order) {
+		private function sendRefundToPaymentServer($refund_amount, $order) {
 
 			$ttid = $order->get_transaction_id();
 			$ordernum = $order->get_order_number();
@@ -256,18 +251,23 @@ function wc_transafe_init() {
 				$path = "transaction/$ttid/refund";
 				$data = [
 					'money' => [
-						'amount' => $amount
+						'amount' => $refund_amount
 					],
 					'order' => [
 						'ordernum' => $ordernum
 					]
 				];
 			} else {
+
+				/* Do not allow partial void/reversal */
+				if ($refund_amount < $order_total) {
+					error_log('Partial void of an unsettled transaction is not allowed.');
+					return null;
+				}
+
 				$method = 'DELETE';
 				$path = "transaction/$ttid";
-				$data = [
-					'amount' => round(floatval($order_total) - floatval($amount), 2)
-				];
+				$data = null;
 			}
 
 			$refund_response = $this->sendTransafeApiRequest($path, $method, $data);
