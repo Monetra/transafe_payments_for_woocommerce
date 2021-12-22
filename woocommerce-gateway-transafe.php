@@ -3,7 +3,7 @@
  * Plugin Name:       TranSafe Payments for WooCommerce
  * Plugin URI:        https://www.transafe.com
  * Description:       Accept credit card payments using TranSafe Gateway
- * Version:           1.0.0
+ * Version:           1.0.3
  * Requires at least: 5.2
  * Requires PHP:      7.0
  * Author:            Monetra Technologies, LLC
