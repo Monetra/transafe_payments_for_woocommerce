@@ -61,18 +61,18 @@ return [
 		'desc_tip'    => true,
 	],
 
-	'user' => [
-		'title'       => 'Username',
+	'apikey_id' => [
+		'title'       => 'API Key ID',
 		'type'        => 'text',
-		'description' => 'Enter the username that will be used to authenticate with the payment server.',
+		'description' => 'Enter the API key ID that will be used to authenticate with the payment server.',
 		'default'     => '',
 		'desc_tip'    => true,
 	],
 
-	'password' => [
-		'title'       => 'Password',
+	'apikey_secret_entry' => [
+		'title'       => 'API Key Secret',
 		'type'        => 'password',
-		'description' => 'Enter the password that will be used to authenticate with the payment server.',
+		'description' => 'Enter the API key secret that will be used to authenticate with the payment server.',
 		'default'     => '',
 		'desc_tip'    => true,
 	],

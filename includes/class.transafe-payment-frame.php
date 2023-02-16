@@ -32,8 +32,7 @@ class TransafePaymentFrame {
 
 	private function getIframeAttributes()
 	{
-		$hmac_fields = $this->getHmacFields();
-		$hmac = $this->generateHmac($hmac_fields);
+		$hmac_data = $this->generateHmacData();
 
 		$iframe_name = 'wc-transafe-iframe-' . uniqid();
 
@@ -41,20 +40,35 @@ class TransafePaymentFrame {
 			'id' => 'wc-transafe-iframe',
 			'name' => $iframe_name,
 			'data-payment-form-host' => $this->config['payment-server-origin'],
-			'data-hmac-hmacsha256' => $hmac
+			'data-hmac-hmacsha256' => $hmac_data['hmac']
 		];
 
-		foreach ($hmac_fields as $key => $value) {
+		foreach ($hmac_data['fields'] as $key => $value) {
 			$iframe_attributes['data-hmac-' . $key] = $value;
 		}
 
 		return $iframe_attributes;
 	}
 
-	private function getHmacFields()
+	private function generateHmacData()
 	{
 		$host_domain = 'https://' . $_SERVER['HTTP_HOST'];
-		$monetra_username = $this->config['user'];
+
+		$apikey_id = $this->config['apikey_id'];
+		$apikey_secret = $this->config['apikey_secret'];
+
+		if (empty($apikey_id) || empty($apikey_secret)) {
+
+			$username = $this->config['username'];
+			$using_apikey = false;
+			$hmac_key = $this->config['password'];
+
+		} else {
+
+			$using_apikey = true;
+			$hmac_key = $this->config['apikey_secret'];
+
+		}
 
 		$hmac_fields = [];
 
@@ -64,7 +78,11 @@ class TransafePaymentFrame {
 
 		$hmac_fields["sequence"] = bin2hex(random_bytes(16));
 
-		$hmac_fields["username"] = $monetra_username;
+		if ($using_apikey) {
+			$hmac_fields['auth_apikey_id'] = $apikey_id;
+		} else {
+			$hmac_fields['username'] = $username;
+		}
 
 		if (!empty($this->config['css-url'])) {
 			$hmac_fields["css-url"] = $host_domain . "/" . $this->config['css-url'];
@@ -80,18 +98,14 @@ class TransafePaymentFrame {
 
 		$hmac_fields["include-submit-button"] = $this->config['include-submit-button'];
 
-		return $hmac_fields;
-	}
-
-	private function generateHmac($hmac_fields)
-	{
-		$monetra_password = $this->config['password'];
-
 		$data_to_hash = implode("", $hmac_fields);
 
-		$hmac = hash_hmac('sha256', $data_to_hash, $monetra_password);
+		$hmac = hash_hmac('sha256', $data_to_hash, $hmac_key);
 
-		return $hmac;
+		return [
+			'hmac' => $hmac,
+			'fields' => $hmac_fields
+		];
 	}
 
 }

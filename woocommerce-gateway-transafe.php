@@ -3,7 +3,7 @@
  * Plugin Name:       TranSafe Payments for WooCommerce
  * Plugin URI:        https://www.transafe.com
  * Description:       Accept credit card payments using TranSafe Gateway
- * Version:           1.0.3
+ * Version:           2.0.0
  * Requires at least: 5.2
  * Requires PHP:      7.0
  * Author:            Monetra Technologies, LLC
@@ -12,6 +12,12 @@
  */
 
 defined('ABSPATH') or exit;
+
+require 'includes/dependencies/autoload.php';
+require 'includes/class.transafe-request-handler.php';
+require 'includes/class.transafe-apikey-generator.php';
+
+use Defuse\Crypto\Crypto;
 
 function wc_transafe_missing_wc_notice() {
 	echo 
@@ -33,6 +39,27 @@ add_action('plugins_loaded', 'wc_transafe_init');
 
 add_filter('woocommerce_payment_gateways', 'wc_transafe_add_to_gateways');
 
+add_action('rest_api_init', 'wc_transafe_init_rest_api');
+
+function wc_transafe_init_rest_api() {
+	register_rest_route('woocommerce_transafe/v1', '/generate_api_key', [
+		'methods' => 'POST',
+		'permissions_callback' => 'wc_transafe_generate_api_key_perms_check',
+		'callback' => ['TransafeApikeyGenerator', 'handleRequest']
+	]);
+}
+
+function wc_transafe_generate_api_key_perms_check() {
+	if (current_user_can('administrator')) {
+		return true;
+	}
+	return new WP_Error(
+		'forbidden', 
+		'You do not have permission to access this resource.',
+		['status' => 401]
+	);
+}
+
 function wc_transafe_plugin_action_links($links) {
 	$plugin_links = [
 		'<a href="admin.php?page=wc-settings&tab=checkout&section=transafe">Settings</a>'
@@ -45,11 +72,8 @@ function wc_transafe_init() {
 
 	class WC_Transafe extends WC_Payment_Gateway {
 
-		const TEST_SERVER_URL = 'https://test.transafe.com';
-		const TEST_SERVER_PORT = '443';
-
-		const LIVE_SERVER_URL = 'https://post.live.transafe.com';
-		const LIVE_SERVER_PORT = '443';
+		const ERROR_LOG_PREFIX = 'TRANSAFE WOOCOMMERCE PLUGIN: ';
+		const LEGACY_PASSWORD_PREFIX = '-legacy-pw|';
 
 		public function __construct() {
 
@@ -57,6 +81,26 @@ function wc_transafe_init() {
 			$this->has_fields         = true;
 			$this->method_title       = 'TranSafe Payments';
 			$this->method_description = 'Accept credit card payments using TranSafe Gateway.';
+
+			$current_password = $this->get_option('password');
+
+			if (!empty($current_password)) {
+				if (strpos($current_password, self::LEGACY_PASSWORD_PREFIX) !== 0) {
+					$encrypted_password = self::encryptValueForStorage($current_password);
+					$this->update_option('password', self::LEGACY_PASSWORD_PREFIX . $encrypted_password);
+				}
+			}
+
+			add_filter('wc_transafe_form_fields', function($fields) {
+
+				$current_apikey_secret = $this->get_option('apikey_secret');
+
+				if (!empty($current_apikey_secret)) {
+					$fields['apikey_secret_entry']['placeholder'] = 'Saved';
+				}
+				return $fields;
+
+			});
 
 			$this->init_form_fields();
 			$this->init_settings();
@@ -72,6 +116,30 @@ function wc_transafe_init() {
 			add_action('wp_enqueue_scripts', [$this, 'payment_scripts']);
 			add_action('admin_enqueue_scripts', [$this, 'admin_scripts']);
 
+			add_filter('pre_update_option_woocommerce_transafe_settings', function($new_value, $old_value) {
+
+				if (!empty($new_value['apikey_secret_entry'])) {
+
+					$encrypted_apikey_secret = self::encryptValueForStorage($new_value['apikey_secret_entry']);
+					$new_value['apikey_secret'] = $encrypted_apikey_secret;
+
+					unset($new_value['password']);
+					unset($new_value['user']);
+
+				} elseif (isset($old_value['password'])
+				&& strpos($old_value['password'], self::LEGACY_PASSWORD_PREFIX) !== 0) {
+
+					$encrypted_password = self::encryptValueForStorage($old_value['password']);
+					$new_value['password'] = self::LEGACY_PASSWORD_PREFIX . $encrypted_password;
+
+				}
+
+				unset($new_value['apikey_secret_entry']);
+
+				return $new_value;
+
+			}, 10, 2);
+
 		}
 
 		public function init_form_fields() {
@@ -85,8 +153,6 @@ function wc_transafe_init() {
 		public function payment_fields() {
 
 			$config = [
-				'user' => $this->get_option('user'),
-				'password' => $this->get_option('password'),
 				'css-url' => $this->get_option('css_url'),
 				'include-cardholdername' => 'no',
 				'include-street' => 'no',
@@ -95,8 +161,10 @@ function wc_transafe_init() {
 				'auto-reload' => $this->get_option('auto_reload'),
 				'autocomplete' => $this->get_option('autocomplete'),
 				'include-submit-button' => 'no',
-				'payment-server-origin' => $this->paymentServerOrigin()
+				'payment-server-origin' => TransafeRequestHandler::paymentServerOrigin()
 			];
+
+			$config = array_merge($config, $this->getStoredCredentials());
 
 			$paymentframe = new TransafePaymentFrame($config);
 
@@ -118,7 +186,7 @@ function wc_transafe_init() {
 
 			$server = $this->get_option('server');
 
-			$paymentframe_script_domain = $this->paymentServerOrigin();
+			$paymentframe_script_domain = TransafeRequestHandler::paymentServerOrigin();
 
 			wp_register_script('paymentframe', $paymentframe_script_domain . '/PaymentFrame/PaymentFrame.js', [], false, true);
 			wp_register_script('checkout', plugins_url('assets/js/checkout.js', __FILE__ ), [], false, true);
@@ -221,7 +289,8 @@ function wc_transafe_init() {
 				]
 			];
 
-			$transaction_response = $this->sendTransafeApiRequest($path, 'POST', $transaction_data);
+			$credentials = $this->getStoredCredentials();
+			$transaction_response = TransafeRequestHandler::sendApiRequest($credentials, 'POST', $path, $transaction_data);
 
 			return $transaction_response;
 		}
@@ -232,7 +301,8 @@ function wc_transafe_init() {
 			$ordernum = $order->get_order_number();
 			$order_total = $order->get_total();
 
-			$transaction_details = $this->sendTransafeApiRequest("transaction/$ttid", 'GET');
+			$credentials = $this->getStoredCredentials();
+			$transaction_details = TransafeRequestHandler::sendApiRequest($credentials, 'GET', "transaction/$ttid");
 
 			if ($transaction_details['code'] !== 'AUTH') {
 
@@ -270,7 +340,7 @@ function wc_transafe_init() {
 				$data = null;
 			}
 
-			$refund_response = $this->sendTransafeApiRequest($path, $method, $data);
+			$refund_response = TransafeRequestHandler::sendApiRequest($credentials, $method, $path, $data);
 
 			if ($refund_response['code'] !== 'AUTH') {
 				error_log(
@@ -282,80 +352,50 @@ function wc_transafe_init() {
 			return $refund_response;
 		}
 
-		private function paymentServerOrigin()
+		private function getStoredCredentials()
 		{
-			$server = $this->get_option('server');
+			$apikey_id = $this->get_option('apikey_id');
+			$encrypted_apikey_secret = $this->get_option('apikey_secret');
+			if (!empty($apikey_id) && !empty($encrypted_apikey_secret)) {
+				return [
+					'apikey_id' => $apikey_id,
+					'apikey_secret' => self::decryptStoredValue($encrypted_apikey_secret)
+				];
+			}
 
-			if ($server === 'test') {
+			$username = $this->get_option('user');
+			$encrypted_password = str_replace(self::LEGACY_PASSWORD_PREFIX, '', $this->get_option('password'));
+			if (!empty($username) && !empty($encrypted_password)) {
+				return [
+					'username' => $username,
+					'password' => self::decryptStoredValue($encrypted_password)
+				];
+			}
 
-				return self::TEST_SERVER_URL . ':' . self::TEST_SERVER_PORT;
-			
-			} elseif ($server === 'live') {
-				
-				return self::LIVE_SERVER_URL . ':' . self::LIVE_SERVER_PORT;
-			
-			} else {
+			error_log(self::ERROR_LOG_PREFIX . 'No stored credentials found');
+			return [];
+		}
 
-				$custom_host = $this->get_option('host');
-
-				if (strpos($custom_host, 'https://') !== 0) {
-					if (strpos($custom_host, 'http://') === 0) {
-						$custom_host = str_replace('http://', 'https://', $custom_host);
-					} else {
-						$custom_host = 'https://' . $custom_host;
-					}
-				}
-				
-				return $custom_host . ':' . $this->get_option('port');
-				
+		private static function encryptValueForStorage($value)
+		{
+			try {
+				$encrypted_value = Crypto::encryptWithPassword($value, \SECURE_AUTH_KEY);
+				return $encrypted_value;
+			} catch (\Exception $e) {
+				error_log(self::ERROR_LOG_PREFIX . 'Unable to encrypt value');
+				return "";
 			}
 		}
 
-		private function sendTransafeApiRequest($path, $method, $data = null)
+		private static function decryptStoredValue($encrypted_value)
 		{
-			$url = $this->paymentServerOrigin() . '/api/v1/' . $path;
-			$username = str_replace(':', '|', $this->get_option('user'));
-			$password = $this->get_option('password');
-
-			$headers = [
-				"Authorization" => "Basic " . base64_encode($username . ':' . $password)
-			];
-
-			if ($method === 'GET') {
-
-				if (!empty($data)) {
-					$url .= '?' . http_build_query($data);
-				}
-				$response = wp_remote_get($url, [
-					'headers' => $headers
-				]);
-
-			} elseif ($method === 'POST') {
-
-				$request_body = json_encode($data);
-				$headers["Content-Type"] = "application/json";
-				$headers["Content-Length"] = strlen($request_body);
-
-				$response = wp_remote_post($url, [
-					'headers' => $headers,
-					'body' => $request_body
-				]);
-
-			} else {
-				$params = [
-					'method' => $method,
-					'headers' => $headers
-				];
-				if (!empty($data)) {
-					$params['body'] = json_encode($data);
-				}
-
-				$response = wp_remote_request($url, $params);
+			try {
+				$value = Crypto::decryptWithPassword($encrypted_value, \SECURE_AUTH_KEY);
+				return $value;
+			} catch (\Exception $e) {
+				error_log(self::ERROR_LOG_PREFIX . 'Unable to decrypt value');
+				return "";
 			}
-
-			$response_body = wp_remote_retrieve_body($response);
-
-			return json_decode($response_body, true);
 		}
 
 	}
