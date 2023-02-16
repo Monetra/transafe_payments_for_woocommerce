@@ -307,7 +307,7 @@ function wc_transafe_init() {
 			if ($transaction_details['code'] !== 'AUTH') {
 
 				error_log(
-					"Unable to retrieve prior transaction details from payment server. Response verbiage: " .
+					self::ERROR_LOG_PREFIX . "Unable to retrieve prior transaction details from payment server. Response verbiage: " .
 					$transaction_details['verbiage']
 				);
 				return null;
@@ -331,7 +331,7 @@ function wc_transafe_init() {
 
 				/* Do not allow partial void/reversal */
 				if ($refund_amount < $order_total) {
-					error_log('Partial void of an unsettled transaction is not allowed.');
+					error_log(self::ERROR_LOG_PREFIX . 'Partial void of an unsettled transaction is not allowed.');
 					return null;
 				}
 
@@ -344,7 +344,7 @@ function wc_transafe_init() {
 
 			if ($refund_response['code'] !== 'AUTH') {
 				error_log(
-					'Unable to process refund through payment server. Response verbiage: ' . 
+					self::ERROR_LOG_PREFIX . 'Unable to process refund through payment server. Response verbiage: ' .
 					$refund_response['verbiage']
 				);
 			}
