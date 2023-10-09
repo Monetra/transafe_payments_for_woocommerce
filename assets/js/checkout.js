@@ -113,6 +113,8 @@ jQuery(function($) {
 		iframeElement.parentElement.removeChild(iframeElement);
 	});
 
+	body.trigger('updated_checkout');
+
 	determineWhetherTransafePaymentIsSelected();
 
 });
